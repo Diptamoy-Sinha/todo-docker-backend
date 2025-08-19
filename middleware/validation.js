@@ -23,6 +23,14 @@ const validateUserRegistration = [
   body('password')
     .isLength({ min: 6 })
     .withMessage('Password must be at least 6 characters long'),
+  body('securityQuestion')
+    .trim()
+    .isLength({ min: 5, max: 200 })
+    .withMessage('Security question must be between 5 and 200 characters'),
+  body('securityAnswer')
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Security answer must be between 1 and 100 characters'),
   handleValidationErrors
 ];
 
@@ -122,6 +130,21 @@ const validateListMember = [
   handleValidationErrors
 ];
 
+const validatePasswordReset = [
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('securityAnswer')
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Security answer is required'),
+  body('newPassword')
+    .isLength({ min: 6 })
+    .withMessage('New password must be at least 6 characters long'),
+  handleValidationErrors
+];
+
 module.exports = {
   validateUserRegistration,
   validateUserLogin,
@@ -134,5 +157,6 @@ module.exports = {
   validateTaskId,
   validateSubtaskId,
   validateListMember,
+  validatePasswordReset,
   handleValidationErrors
 };

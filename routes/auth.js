@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
-const { validateUserRegistration, validateUserLogin } = require('../middleware/validation');
+const { validateUserRegistration, validateUserLogin, validatePasswordReset } = require('../middleware/validation');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -10,7 +10,7 @@ const router = express.Router();
 // Register a new user
 router.post('/register', validateUserRegistration, async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, securityQuestion, securityAnswer } = req.body;
 
     // Check if user already exists
     const existingUser = await pool.query(
@@ -26,10 +26,13 @@ router.post('/register', validateUserRegistration, async (req, res) => {
     const saltRounds = 12;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
+    // Hash security answer (case insensitive)
+    const securityAnswerHash = await bcrypt.hash(securityAnswer.toLowerCase().trim(), saltRounds);
+
     // Create user
     const result = await pool.query(
-      'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email, created_at',
-      [name, email, passwordHash]
+      'INSERT INTO users (name, email, password_hash, security_question, security_answer_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, created_at',
+      [name, email, passwordHash, securityQuestion, securityAnswerHash]
     );
 
     const user = result.rows[0];
@@ -189,6 +192,78 @@ router.put('/change-password', authenticateToken, async (req, res) => {
     res.json({ message: 'Password changed successfully' });
   } catch (error) {
     console.error('Password change error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get security question for password reset
+router.post('/get-security-question', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Find user and get security question
+    const result = await pool.query(
+      'SELECT security_question FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({
+      securityQuestion: result.rows[0].security_question
+    });
+  } catch (error) {
+    console.error('Get security question error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Reset password using security question
+router.post('/reset-password', validatePasswordReset, async (req, res) => {
+  try {
+    const { email, securityAnswer, newPassword } = req.body;
+
+    // Find user
+    const userResult = await pool.query(
+      'SELECT id, security_answer_hash FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userResult.rows[0];
+
+    // Verify security answer (case insensitive)
+    const isValidAnswer = await bcrypt.compare(
+      securityAnswer.toLowerCase().trim(), 
+      user.security_answer_hash
+    );
+
+    if (!isValidAnswer) {
+      return res.status(401).json({ error: 'Incorrect security answer' });
+    }
+
+    // Hash new password
+    const saltRounds = 12;
+    const newPasswordHash = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update password
+    await pool.query(
+      'UPDATE users SET password_hash = $1 WHERE id = $2',
+      [newPasswordHash, user.id]
+    );
+
+    res.json({ message: 'Password reset successfully' });
+  } catch (error) {
+    console.error('Password reset error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
